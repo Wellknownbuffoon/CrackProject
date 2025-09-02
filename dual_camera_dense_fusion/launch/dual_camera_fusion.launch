@@ -1,0 +1,25 @@
+<launch>
+  <!-- Front camera -->
+  <include file="$(find realsense2_camera)/launch/rs_camera.launch">
+    <arg name="camera_name" value="d435_front"/>
+  </include>
+
+  <!-- Left camera -->
+  <include file="$(find realsense2_camera)/launch/rs_camera.launch">
+    <arg name="camera_name" value="d435_left"/>
+  </include>
+
+  <!-- RTAB-Map -->
+  <include file="$(find rtabmap_ros)/launch/rtabmap.launch">
+    <arg name="rtabmap_args" value="--delete_db_on_start"/>
+    <arg name="depth_topic" value="/d435_front/aligned_depth_to_color/image_raw"/>
+    <arg name="rgb_topic" value="/d435_front/color/image_raw"/>
+    <arg name="camera_info_topic" value="/d435_front/color/camera_info"/>
+    <arg name="approx_sync" value="false"/>
+    <arg name="rtabmapviz" value="false"/>
+    <arg name="rviz" value="true"/>
+  </include>
+
+  <!-- Fusion Node -->
+  <node pkg="dual_camera_dense_fusion" type="dual_camera_dense_fusion_node" name="dual_camera_dense_fusion_node" output="screen"/>
+</launch>
