@@ -1,0 +1,9 @@
+<launch>
+  <!-- Run TurtleBot3 navigation -->
+  <include file="$(find turtlebot3_navigation)/launch/turtlebot3_navigation.launch">
+    <arg name="map_file" value="$(env HOME)/map.yaml"/>
+  </include>
+
+  <!-- Run your combined system (alignment + grid overlay) -->
+  <node pkg="your_pkg" type="grid_system" name="grid_system" output="screen"/>
+</launch>
