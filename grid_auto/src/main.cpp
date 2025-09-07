@@ -8,8 +8,10 @@ int main(int argc, char** argv) {
 
     ROBOTALLIGN robot_align(nh);      // alignment module
     GridOverlay grid(nh,&robot_align);      // grid visualization module
+    grid.initLog("/home/khoi/navigation_log");
 
     ROS_INFO("Grid system started: alignment + overlay running");
     ros::spin();
+    grid.closeLog();
     return 0;
 }
