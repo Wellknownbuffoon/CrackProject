@@ -8,10 +8,17 @@
 #include <geometry_msgs/Twist.h>
 #include <visualization_msgs/MarkerArray.h>
 #include <interactive_markers/interactive_marker_server.h>
+#include <fstream>
 class ROBOTALLIGN; 
 class GridOverlay {
 public:
     GridOverlay(ros::NodeHandle& nh, ROBOTALLIGN* align);
+    void initLog(const std::string &base_filename);
+    void logPathData(double path_length, int num_turns);
+    void logNavigationData(const std::string& event, double distance_to_goal = 0.0);
+    void closeLog();
+    double computePathLength(const std::vector<geometry_msgs::Point>& path);
+    int computeNumTurns(const std::vector<geometry_msgs::Point>& path);
     
     
 
@@ -24,6 +31,12 @@ private:
     ros::Subscriber local_map_sub_;
     nav_msgs::OccupancyGrid::ConstPtr local_map_;
     bool got_local_map_;
+    std::ofstream path_logfile_;      // For path data
+    std::ofstream navigation_logfile_; // For navigation progress
+    ros::Time start_time_;
+    int num_turns_;
+    double path_length_;
+    int path_counter_;   
 
     
 
