@@ -45,6 +45,9 @@ void GridOverlay::amclCb(const geometry_msgs::PoseWithCovarianceStamped::ConstPt
         double dx = target.x - robot_pose_.position.x;
         double dy = target.y - robot_pose_.position.y;
         double dist = sqrt(dx*dx + dy*dy);
+        double dist_to_final_goal = sqrt(pow(goal_point_.x - robot_pose_.position.x, 2) + 
+                                       pow(goal_point_.y - robot_pose_.position.y, 2));
+        logNavigationData("navigating", dist_to_final_goal);
 
         geometry_msgs::Twist nav_cmd;
 
@@ -86,6 +89,12 @@ void GridOverlay::clickCb(const geometry_msgs::PointStamped::ConstPtr& msg) {
     if (computePath(sx, sy, gx, gy, path_)) {
         path_index_ = 0;
         has_goal_ = true;
+        double path_length_ = computePathLength(path_);
+        int num_turns_ = computeNumTurns(path_);
+        logPathData(path_length_, num_turns_);
+        double dist_to_goal = sqrt(pow(gx - robot_pose_.position.x, 2) + 
+                              pow(gy - robot_pose_.position.y, 2));
+        logNavigationData("path_planned", dist_to_goal);
 
         // Send path to ROBOTALLIGN
         if (robot_align_) {
@@ -96,6 +105,8 @@ void GridOverlay::clickCb(const geometry_msgs::PointStamped::ConstPtr& msg) {
         ROS_WARN("No path found");
         has_goal_ = false;
     }
+    
+
 
     publishMarkers();
 }
@@ -148,7 +159,7 @@ bool GridOverlay::computePath(double sx, double sy, double gx, double gy,
     if (cost >= 50) return false; // occupied
 
     // Inflate: check neighbors around (mx,my)
-    int inflation_radius = 2; // cells (tune depending on robot radius)
+    int inflation_radius = 1; // cells (tune depending on robot radius)
     for (int dx=-inflation_radius; dx<=inflation_radius; dx++) {
         for (int dy=-inflation_radius; dy<=inflation_radius; dy++) {
             int nx = mx + dx, ny = my + dy;
@@ -360,6 +371,12 @@ void GridOverlay::createInteractiveMarker(double x, double y, int id) {
         if (computePath(sx, sy, gx, gy, path_)) {
             path_index_ = 0;
             has_goal_ = true;
+            double path_length_ = computePathLength(path_);
+            int num_turns_ = computeNumTurns(path_);
+            logPathData(path_length_, num_turns_);
+            double dist_to_goal = sqrt(pow(gx - robot_pose_.position.x, 2) + 
+                              pow(gy - robot_pose_.position.y, 2));
+            logNavigationData("path_planned", dist_to_goal);
             if (robot_align_){
                robot_align_->setPath(path_);
                robot_align_->startNavigation();
@@ -371,4 +388,93 @@ void GridOverlay::createInteractiveMarker(double x, double y, int id) {
         }
     }); // properly close lambda
 }
+void GridOverlay::initLog(const std::string& base_filename) {
+    // Create timestamp for unique filenames
+    ros::Time now = ros::Time::now();
+    std::string timestamp = std::to_string(now.sec);
+    
+    // Open path log file
+    std::string path_filename = base_filename + "_path_" + timestamp + ".txt";
+    path_logfile_.open(path_filename, std::ios::out);
+    path_logfile_ << "timestamp,path_length,num_turns,waypoints,goal_x,goal_y\n";
+    
+    // Open navigation log file  
+    std::string nav_filename = base_filename + "_navigation_" + timestamp + ".txt";
+    navigation_logfile_.open(nav_filename, std::ios::out);
+    navigation_logfile_ << "timestamp,event,distance_to_goal,robot_x,robot_y\n";
+    
+    start_time_ = now;
+    path_counter_ = 0;
+    num_turns_ = 0;
+    path_length_ = 0.0;
+    
+    ROS_INFO("Log files initialized: %s, %s", path_filename.c_str(), nav_filename.c_str());
+}
+
+void GridOverlay::logPathData(double path_length, int num_turns) {
+    double elapsed = (ros::Time::now() - start_time_).toSec();
+    path_logfile_ << elapsed << "," 
+                 << path_length << ","
+                 << num_turns << ","
+                 << path_.size() << ","
+                 << goal_point_.x << ","
+                 << goal_point_.y << "\n";
+    path_logfile_.flush();
+    
+    ROS_INFO("Path logged: length=%.2fm, turns=%d, waypoints=%zu", 
+             path_length, num_turns, path_.size());
+}
+
+void GridOverlay::logNavigationData(const std::string& event, double distance_to_goal) {
+    double elapsed = (ros::Time::now() - start_time_).toSec();
+    navigation_logfile_ << elapsed << ","
+                       << event << ","
+                       << distance_to_goal << ","
+                       << robot_pose_.position.x << ","
+                       << robot_pose_.position.y << "\n";
+    navigation_logfile_.flush();
+    
+    ROS_DEBUG("Navigation event: %s, distance=%.2fm", event.c_str(), distance_to_goal);
+}
+
+void GridOverlay::closeLog() {
+    if (path_logfile_.is_open()) {
+        path_logfile_ << "# End of log\n";
+        path_logfile_.close();
+    }
+    if (navigation_logfile_.is_open()) {
+        navigation_logfile_ << "# End of log\n";
+        navigation_logfile_.close();
+    }
+    ROS_INFO("Log files closed");
+}
+
+double GridOverlay::computePathLength(const std::vector<geometry_msgs::Point>& path) {
+    double len = 0.0;
+    for (size_t i = 1; i < path.size(); i++) {
+        double dx = path[i].x - path[i-1].x;
+        double dy = path[i].y - path[i-1].y;
+        len += std::sqrt(dx*dx + dy*dy);
+    }
+    return len;
+}
+
+int GridOverlay::computeNumTurns(const std::vector<geometry_msgs::Point>& path) {
+    if (path.size() < 3) return 0;
+    int turns = 0;
+    for (size_t i = 2; i < path.size(); i++) {
+        double dx1 = path[i-1].x - path[i-2].x;
+        double dy1 = path[i-1].y - path[i-2].y;
+        double dx2 = path[i].x   - path[i-1].x;
+        double dy2 = path[i].y   - path[i-1].y;
+        if ((dx1*dy2 - dy1*dx2) != 0) { // direction changed
+            turns++;
+        }
+    }
+    return turns;
+}
+
+
+
+
 
