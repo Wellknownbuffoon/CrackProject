@@ -13,13 +13,19 @@ class GridOverlay {
 public:
     GridOverlay(ros::NodeHandle& nh, ROBOTALLIGN* align);
     
+    
 
 private:
     ros::Subscriber map_sub_;
     ros::Subscriber amcl_sub_;
     ros::Subscriber click_sub_;
     ros::Publisher markers_pub_;
-    ros::Publisher nav_cmd_pub_;   // <-- NEW
+    ros::Publisher nav_cmd_pub_; 
+    ros::Subscriber local_map_sub_;
+    nav_msgs::OccupancyGrid::ConstPtr local_map_;
+    bool got_local_map_;
+
+    
 
     nav_msgs::OccupancyGrid::ConstPtr map_;
     geometry_msgs::Pose robot_pose_;
@@ -38,6 +44,8 @@ private:
     void amclCb(const geometry_msgs::PoseWithCovarianceStamped::ConstPtr& msg);
     void mapCb(const nav_msgs::OccupancyGrid::ConstPtr& msg);
     void clickCb(const geometry_msgs::PointStamped::ConstPtr& msg);
+    void localMapCb(const nav_msgs::OccupancyGrid::ConstPtr& msg);
+
 
     void computeGridOrigin();
     void publishMarkers();
