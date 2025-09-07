@@ -8,7 +8,8 @@
 
 
 GridOverlay::GridOverlay(ros::NodeHandle& nh, ROBOTALLIGN* align) : robot_align_(align){
-    map_sub_   = nh.subscribe("map", 1, &GridOverlay::mapCb, this);
+    map_sub_   = nh.subscribe("/map", 1, &GridOverlay::mapCb, this);
+    local_map_sub_ = nh.subscribe("/move_base/local_costmap/costmap", 1, &GridOverlay::localMapCb, this);
     amcl_sub_  = nh.subscribe("/amcl_pose", 1, &GridOverlay::amclCb, this);
     click_sub_ = nh.subscribe("/clicked_point", 1, &GridOverlay::clickCb, this);
     server_ = std::make_shared<interactive_markers::InteractiveMarkerServer>("grid_points");
@@ -20,10 +21,16 @@ GridOverlay::GridOverlay(ros::NodeHandle& nh, ROBOTALLIGN* align) : robot_align_
     grid_step_ = 0.5;
     got_pose_ = got_map_ = grid_ready_ = false;
     has_goal_ = false;
+    got_local_map_ = false;
     path_index_ = 0;
 
     ROS_INFO("GridOverlay initialized (click-to-goal enabled)");
 }
+void GridOverlay::localMapCb(const nav_msgs::OccupancyGrid::ConstPtr& msg) {
+    local_map_ = msg;
+    got_local_map_ = true;
+}
+
 
 void GridOverlay::amclCb(const geometry_msgs::PoseWithCovarianceStamped::ConstPtr& msg) {
     robot_pose_ = msg->pose.pose;
@@ -112,12 +119,13 @@ void GridOverlay::snapToGrid(double wx, double wy, double& sx, double& sy) {
 
 bool GridOverlay::computePath(double sx, double sy, double gx, double gy,
                               std::vector<geometry_msgs::Point>& path) {
-    if (!map_) return false;
-    int map_w = map_->info.width;
-    int map_h = map_->info.height;
-    double map_x0 = map_->info.origin.position.x;
-    double map_y0 = map_->info.origin.position.y;
-    double map_res = map_->info.resolution;
+    if (!got_local_map_) return false;
+    auto costmap = local_map_;
+    int map_w = costmap->info.width;
+    int map_h = costmap->info.height;
+    double map_x0 = costmap->info.origin.position.x;
+    double map_y0 = costmap->info.origin.position.y;
+    double map_res = costmap->info.resolution;
 
     auto worldToGrid = [&](double wx, double wy, int& i, int& j) {
         i = (int)std::round((wx - origin_x_) / grid_step_ - 0.5);
@@ -135,7 +143,22 @@ bool GridOverlay::computePath(double sx, double sy, double gx, double gy,
         int my = (int)std::floor((wy - map_y0) / map_res);
         if (mx < 0 || mx >= map_w || my < 0 || my >= map_h) return false;
         int idx = my * map_w + mx;
-        return map_->data[idx] == 0;
+        int cost = costmap->data[idx];
+    if (cost < 0) return false;  // unknown is not free
+    if (cost >= 50) return false; // occupied
+
+    // Inflate: check neighbors around (mx,my)
+    int inflation_radius = 2; // cells (tune depending on robot radius)
+    for (int dx=-inflation_radius; dx<=inflation_radius; dx++) {
+        for (int dy=-inflation_radius; dy<=inflation_radius; dy++) {
+            int nx = mx + dx, ny = my + dy;
+            if (nx < 0 || nx >= map_w || ny < 0 || ny >= map_h) continue;
+            int nidx = ny * map_w + nx;
+            if (costmap->data[nidx] >= 50) return false; // too close to obstacle
+        }
+    }
+
+    return true;
     };
 
     int si, sj, gi, gj;
@@ -199,6 +222,29 @@ bool GridOverlay::computePath(double sx, double sy, double gx, double gy,
         cur=came_from[cur];
     }
     std::reverse(path.begin(), path.end());
+
+// Compress collinear waypoints (keep only corners + start/goal)
+std::vector<geometry_msgs::Point> compressed;
+if (!path.empty()) {
+    compressed.push_back(path.front());
+    int dx_prev = 0, dy_prev = 0;
+
+    for (size_t i = 1; i < path.size(); i++) {
+        int dx = (int)std::round(path[i].x - path[i-1].x);
+        int dy = (int)std::round(path[i].y - path[i-1].y);
+
+        if (dx != dx_prev || dy != dy_prev) {
+            // direction changed → keep last point
+            compressed.push_back(path[i-1]);
+        }
+        dx_prev = dx;
+        dy_prev = dy;
+    }
+
+    compressed.push_back(path.back());
+    path = compressed;
+}
+
     return true;
 }
 
@@ -325,5 +371,4 @@ void GridOverlay::createInteractiveMarker(double x, double y, int id) {
         }
     }); // properly close lambda
 }
-
 
